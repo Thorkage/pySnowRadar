@@ -1,6 +1,6 @@
 name: py3-pySnowRadar
 channels:
-  - defaults
+  - conda-forge
 dependencies:
   - asn1crypto=0.24.0
   - astroid=2.2.5
@@ -113,7 +113,7 @@ dependencies:
   - pylint=2.3.1
   - pyopenssl=19.0.0
   - pyparsing=2.4.0
-  - pyproj=1.9.6
+  - pyproj=1.9.6  
   - pyqt=5.9.2
   - pyrsistent=0.14.11
   - pyshp=2.1.0
