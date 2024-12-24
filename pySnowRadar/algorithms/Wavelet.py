@@ -34,6 +34,7 @@ def Wavelet_TN(data, null_2_space, delta_fast_time_range, n_snow, ref_snow_layer
     
     lin_coefs = cwt(data, pywt.Wavelet('haar'), lin_scale_vect, cwt_precision)
     log_coefs = cwt(10 * np.log10(data), pywt.Wavelet('haar'), log_scale_vect, cwt_precision)
+    # log_coefs = cwt(np.log(data), pywt.Wavelet('haar'), log_scale_vect, cwt_precision) #!!! CHANGED TO LN INSTEAD OF 10log10 !!!!
     
     # Negating edge effects here, we use half the max scale on either end
     # Some discussion is needed on this approach because it can sometimes lead to weird picks
@@ -46,10 +47,10 @@ def Wavelet_TN(data, null_2_space, delta_fast_time_range, n_snow, ref_snow_layer
     sum_log_coefs = np.sum(log_coefs,axis=0) / log_coefs.shape[0]
     sum_lin_coefs = np.sum(lin_coefs,axis=0) / lin_coefs.shape[0]
     
-    locs_si = np.argmax(-sum_lin_coefs)
+    locs_si = np.argmax( -sum_lin_coefs) 
     locs_as = np.argmax(-sum_log_coefs)
     
-    return locs_as, locs_si
+    return locs_as, locs_si, sum_log_coefs, sum_lin_coefs
 
 def Wavelet_JK(data, scale_vect, **kwargs):
     log_gaus1_coefs, _ =  pywt.cwt(10 * np.log10(data),scale_vect,'gaus1')
@@ -88,7 +89,7 @@ def cwt(data, wavelet, scales, precision):
     j_m = [np.delete(j, np.where((j >= np.size(int_psi)))[0]) 
            for j in j_a if np.max(j) >= np.size(int_psi)]
     coef_a = [-np.sqrt(scales[i]) 
-               * np.diff(np.convolve(data, int_psi[x.astype(np.int)][::-1]))
+               * np.diff(np.convolve(data, int_psi[x.astype(int)][::-1]))
               for (i, x) in enumerate(j_m)]
     out_coefs = np.asarray([coef[int(np.floor((coef.size - data.size) / 2))
                             :int(-np.ceil((coef.size - data.size) /2))] for coef in coef_a])

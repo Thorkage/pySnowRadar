@@ -1,12 +1,12 @@
 name: py3-pySnowRadar
 channels:
-  - defaults
+  - conda-forge
 dependencies:
+  - python>=3.7,<3.8  
   - descartes
   - geopandas
   - h5py
   - jupyter
-  - python=3
   - pywavelets
   - scipy
   - pytest

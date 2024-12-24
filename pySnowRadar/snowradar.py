@@ -8,6 +8,7 @@ from scipy import signal
 from shapely.geometry import box, Point, LineString
 
 from . import matfunc, timefunc
+import pandas as pd
 
 C = 299792458 # Vacuum speed of light
 
@@ -114,12 +115,15 @@ class SnowRadar:
             utc_times = np.asarray([
                 np.floor((self.day + timedelta(seconds=t)).timestamp()) for t in radar_dat['UTC_time']
             ])
+            utc_times = np.asarray(pd.Series(utc_times).apply(lambda x: datetime(1970,1,1) + timedelta(hours=2, seconds=x)).to_list())
         # OIB/AWI matfiles do not!
         except KeyError:
             utc_times = np.asarray([timefunc.utcleap(gps) for gps in gps_times])
+            
         self.file_epoch = utc_times
         fast_times = radar_dat['Time']
         self.bandwidth = np.abs((f1 - f0) * fmult)
+        self.centerfrequency = np.abs(f1 - f0) /2 
         self.dft = fast_times[1] - fast_times[0] # delta fast time
         self.dfr = self.dft * 0.5 * C # delta fast time range
         # load just the metadata concerning timing
@@ -155,12 +159,12 @@ class SnowRadar:
                 self.surface = None
             # Sometimes there are elev corrections available
             try:
-                self.elv_corr = radar_dat['Elevation_Correction'].astype(np.int64)
+                self.elv_corr = radar_dat['Elevation_Correction'].astype(int)
             except KeyError:
                 self.elv_corr = None
             # Check if the FMCW echograms are compressed in the matfile
             try:
-                self.trunc_bins = radar_dat['Truncate_Bins'].astype(np.int64)
+                self.trunc_bins = radar_dat['Truncate_Bins'].astype(int)
             except KeyError:
                 self.trunc_bins = None
             # Check if the file has previously been elevation corrected
