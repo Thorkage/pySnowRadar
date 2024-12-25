@@ -13,7 +13,6 @@ from pySnowRadar import ATM, SnowRadar, algorithms
 from shapely import Polygon
 from scipy.signal import find_peaks
 import haversine
-from pyproj import Transformer, transform
 
 C = 299792458 # Vacuum speed of light
 
