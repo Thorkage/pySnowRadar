@@ -36,9 +36,9 @@ def geo_filter_insitu_sites(path, site, input_sr_data):
     # Drop all data that intersects with land features
     # for site in sites:
     land = gpd.read_file(os.path.join(path, f'extent_{site}.shp'))
-    x = np.array(list(land.loc[0, 'geometry'].exterior.xy[0])) - 360
-    y = np.array(list(land.loc[0, 'geometry'].exterior.xy[1]))
-    land.loc[0,'geometry'] = Polygon(zip(x,y))
+    x = np.array(list(land.loc[0, 'geometry'].exterior.coords.xy[0])) - 360
+    y = np.array(list(land.loc[0, 'geometry'].exterior.coords.xy[1]))
+    land.loc[0,'geometry'] = {'type': 'Polygon', 'coordinates': [list(zip(x, y))]}
     land = land.set_crs('EPSG:4326')
     
     # Load the datafiles in 'meta' mode to just scrape the simplified track line
@@ -54,7 +54,6 @@ def geo_filter_insitu_sites(path, site, input_sr_data):
         LOGGER.warning('No suitable datafiles left after geospatial filtering')
         return []
         
-    
     return sr_gdf.file.tolist()
 
 
