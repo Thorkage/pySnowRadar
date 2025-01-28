@@ -3,7 +3,8 @@ import h5py
 from datetime import datetime
 
 from shapely.geometry import box
-
+from pyproj import Transformer
+transformer = Transformer.from_crs(4326, 3413, always_xy=True)
 # https://nsidc.org/data/ILATM1B/versions/2#title2
 TRANSCEIVER_LUT = {'T2': 15, 'T3': 23, 'T4': 30}
 
@@ -42,11 +43,21 @@ class ATM:
             self.time_gps = hhmmss_to_sec(
                src['instrument_parameters/time_hhmmss'][()]
             )
+            
             # retrieve a rough bounding box
-            self.bbox = box(*[
+            self.bbox_lonlat = box(*[
                 src[f'ancillary_data/{key}'][()][0]
                 for key in ['min_longitude', 'min_latitude', 'max_longitude', 'max_latitude']
             ])
+            
+            min_x, min_y = transformer.transform(src[f'ancillary_data/min_longitude'][()][0], src[f'ancillary_data/min_latitude'][()][0])
+            max_x, max_y = transformer.transform(src[f'ancillary_data/max_longitude'][()][0], src[f'ancillary_data/max_latitude'][()][0])         
+            self.bbox_xy = box(*[
+                min_x, min_y, max_x, max_y
+            ])
+            
+            
+
 
     def __str__(self):
         return f'{self.data_type} Datafile: {self.file_name}'

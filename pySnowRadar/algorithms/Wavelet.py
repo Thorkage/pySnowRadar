@@ -1,5 +1,6 @@
 import numpy as np
 import pywt
+from scipy.signal import find_peaks
 
 def Wavelet_TN(data, null_2_space, delta_fast_time_range, n_snow, ref_snow_layer, cwt_precision, **kwargs):
     '''
@@ -30,12 +31,18 @@ def Wavelet_TN(data, null_2_space, delta_fast_time_range, n_snow, ref_snow_layer
     snow_layer_opl = ref_snow_layer * n_snow * 2
     ref_scale_log_m = 2 * snow_layer_opl
     max_scale_log = np.ceil(ref_scale_log_m / delta_fast_time_range)
-    log_scale_vect = np.arange(2, max_scale_log, 1)[1::2]
+    
+    # !!! CHANGED TO LIN SCALE VECT INSTEAD OF LOG SCALE VECT !!!
+    # log_scale_vect = np.arange(2, max_scale_lin, 1)[1::2] # !!! CHANGED TO LIN SCALE VECT INSTEAD OF LOG SCALE VECT !!!
+    log_scale_vect = np.arange(2, max_scale_log, 1)[1::2] # !!! CHANGED TO LIN SCALE VECT INSTEAD OF LOG SCALE VECT !!!
+    
+    # !!! CHANGED TO LIN SCALE VECT INSTEAD OF LOG SCALE VECT !!!
+    
     
     lin_coefs = cwt(data, pywt.Wavelet('haar'), lin_scale_vect, cwt_precision)
     log_coefs = cwt(10 * np.log10(data), pywt.Wavelet('haar'), log_scale_vect, cwt_precision)
     # log_coefs = cwt(np.log(data), pywt.Wavelet('haar'), log_scale_vect, cwt_precision) #!!! CHANGED TO LN INSTEAD OF 10log10 !!!!
-    
+    # 
     # Negating edge effects here, we use half the max scale on either end
     # Some discussion is needed on this approach because it can sometimes lead to weird picks
     lin_coefs[:, 0:np.ceil(max_scale_lin/2).astype(int)] = 0
@@ -47,10 +54,31 @@ def Wavelet_TN(data, null_2_space, delta_fast_time_range, n_snow, ref_snow_layer
     sum_log_coefs = np.sum(log_coefs,axis=0) / log_coefs.shape[0]
     sum_lin_coefs = np.sum(lin_coefs,axis=0) / lin_coefs.shape[0]
     
-    locs_si = np.argmax( -sum_lin_coefs) 
+    locs_si = np.argmax(-sum_lin_coefs) 
     locs_as = np.argmax(-sum_log_coefs)
     
-    return locs_as, locs_si, sum_log_coefs, sum_lin_coefs
+    # locs_as_1per = (sum_log_coefs > sum_log_coefs[locs_as] * 0.99) #& (sum_log_coefs < sum_log_coefs[locs_as] * 1.01)
+    
+    
+    #5% of the max value (left and right) for air-snow interface
+    locs_as_left = np.argmax(-sum_log_coefs > np.max(-sum_log_coefs) * 0.99)
+    locs_as_right = len(sum_log_coefs) - 1 - np.argmax((-sum_log_coefs > np.max(-sum_log_coefs) * 0.99)[::-1])
+    
+    #5% of the max value (left and right) for snow-ice interface
+    locs_si_left = np.argmax(-sum_lin_coefs > np.max(-sum_lin_coefs) * 0.99)
+    locs_si_right = len(sum_lin_coefs) - 1 - np.argmax((-sum_lin_coefs > np.max(-sum_lin_coefs) * 0.99)[::-1])  
+    
+    #how large is the found peak in snow-ice compared to next highest peak in the signal
+    # peaks, _ = find_peaks(abs(ds['wavelet_coefs_lin'][:,ind]), height=0.5*np.max(abs(ds['wavelet_coefs_lin'][:,ind].values)))
+    peaks,_ = find_peaks(-sum_lin_coefs, height=0.25*np.max(-sum_lin_coefs))
+    if len(peaks) > 1:
+        si_ratio = ((-sum_lin_coefs[peaks]) / np.max(-sum_lin_coefs))[1]
+    else:
+        si_ratio = 1
+        
+    return locs_as, locs_as_left, locs_as_right, locs_si, locs_si_left, locs_si_right, sum_log_coefs, sum_lin_coefs, si_ratio #locs_as_1per
+
+
 
 def Wavelet_JK(data, scale_vect, **kwargs):
     log_gaus1_coefs, _ =  pywt.cwt(10 * np.log10(data),scale_vect,'gaus1')

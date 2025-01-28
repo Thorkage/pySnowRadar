@@ -9,7 +9,9 @@ from shapely.geometry import box, Point, LineString
 
 from . import matfunc, timefunc
 import pandas as pd
-
+from pyproj import Transformer
+transformer = Transformer.from_crs(4326, 3413, always_xy=True)
+ 
 C = 299792458 # Vacuum speed of light
 
 # https://ops.cresis.ku.edu/wiki/index.php/Raw_File_Guide
@@ -108,6 +110,7 @@ class SnowRadar:
             fmult = float(fmult[1])
         lats = radar_dat['Latitude']
         lons = radar_dat['Longitude']
+        x, y = transformer.transform(lons, lats)
         gps_times = radar_dat['GPS_time']
         # NSIDC netCDF files store UTC-time already
         # but apparently only in seconds-since-beginning-of-day! Argh!
@@ -123,9 +126,16 @@ class SnowRadar:
         self.file_epoch = utc_times
         fast_times = radar_dat['Time']
         self.bandwidth = np.abs((f1 - f0) * fmult)
-        self.centerfrequency = np.abs(f1 - f0) /2 
+        self.centerfrequency = np.abs(f1 - f0) / 2 
         self.dft = fast_times[1] - fast_times[0] # delta fast time
         self.dfr = self.dft * 0.5 * C # delta fast time range
+        
+        self.decimate_factor = radar_dat['param_get_heights']['get_heights']['decimate_factor'] # param_get_heights(1).get_heights(1).decimate_factor
+        self.presums = radar_dat['param_get_heights']['get_heights']['presums'] #param_get_heights(1).get_heights(1).presums
+        self.number_averages = self.decimate_factor * self.presums
+        
+        self.prf = radar_dat['param_get_heights']['radar']['prf']
+        
         # load just the metadata concerning timing
         if self.load_type == 'meta':
             time_start = gps_times.min()
@@ -149,6 +159,8 @@ class SnowRadar:
             self.time_fast = fast_times
             self.lat = lats
             self.lon = lons
+            self.x, self.y =  x, y
+            
             # stored as radians, so we convert to degrees
             self.roll = np.degrees(radar_dat['Roll'])
             self.pitch = np.degrees(radar_dat['Pitch'])
@@ -181,10 +193,14 @@ class SnowRadar:
         )).ravel()
         self.poly = box(*self.extent)
         # Simplified polyline of track
-        points = [Point(xy) for xy in zip(lons, lats)]
-        line = LineString(points)
+        points_xy = [Point(xy) for xy in zip(x, y)]
+        line_xy = LineString(points_xy)
+        
+        points_lonlat = [Point(xy) for xy in zip(lons, lats)]
+        line_lonlat = LineString(points_lonlat)
         # try to simplify the line with a tight tolerance (degrees)
-        self.line = line.simplify(tolerance=1e-6)
+        self.line_xy = line_xy.simplify(tolerance=1e-6)
+        self.line_lonlat = line_lonlat.simplify(tolerance=1e-6)
         
 
     def get_surface(self, smooth=True, window = 5):
