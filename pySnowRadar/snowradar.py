@@ -130,6 +130,8 @@ class SnowRadar:
         self.dft = fast_times[1] - fast_times[0] # delta fast time
         self.dfr = self.dft * 0.5 * C # delta fast time range
         
+        
+        # FOR SNOW RADAR DATA FROM LATER THAN 2016, THIS DOES NOT WORK, PARAMS ARE STORED DIFFERENTLY
         self.decimate_factor = radar_dat['param_get_heights']['get_heights']['decimate_factor'] # param_get_heights(1).get_heights(1).decimate_factor
         self.presums = radar_dat['param_get_heights']['get_heights']['presums'] #param_get_heights(1).get_heights(1).presums
         self.number_averages = self.decimate_factor * self.presums

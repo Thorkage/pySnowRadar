@@ -26,19 +26,18 @@ from scipy.constants import speed_of_light
 LOGGER = logging.getLogger(__name__)
 
 def geo_filter_insitu_sites(path, year, site, input_sr_data):
-    # '''
-    # Given a list of SnowRadar datafiles (.mat, .h5, .nc), filter out
-    # any files whose bounding geometry intersect with land
+    '''
+    A more adaptive function to filter out based on a given shapefile. 
+   
+    Arguments:
+        path: path where the shapefile is located
+        year: year of the campaign (used for the in-situ validation)
+        site: site which shall be subset to (used for the in-situ validation)
+        input_sr_data: list of supported SnowRadar data files
 
-    # Landmask is based on NaturalEarth 1:10m Cultural v4.1.0 (Canada, Greenland, and USA)
-    # http://www.naturalearthdata.com/
-
-    # Arguments:
-    #     input_sr_data: list of supported SnowRadar data files
-
-    # Output:
-    #     subset of input_sr_data where no land intersections occur
-    # '''
+    Output:
+        subset of input_sr_data which intersects with the measurement site boundaries
+    '''
     # Drop all data that intersects with land features
     # for site in sites:
     land = gpd.read_file(os.path.join(path, f'EUREKA{year}_{site}_measurement_bounds.shp'))
@@ -100,9 +99,12 @@ def geo_filter(input_sr_data):
 
 
 def lever_arm_compensation(phase_center, radar_dat):
-    # !!!!!! At the moment this ignores offset in y (wing) direction, since this offset is super small (4cm) in the 2016 Greenland P3 campaign !!!!!
-    # since lever arms are given in meters, it is probably easiest to convert lon, lat to x,y [m] first, then do the compensation and then convert back
-    # elevation is simply an offset 
+    '''
+    Perform lever_arm_compensation.
+    At the moment this ignores offset in x (nose) and y (wing) direction.
+    It seems like the NSIDC L1 echograms are already compensated for this
+    '''
+   
     
     # transformer1 = Transformer.from_crs('EPSG:4326', "EPSG:3413", always_xy=True,)
     # transformer2 = Transformer.from_crs('EPSG:3413', "EPSG:4326", always_xy=True,)
@@ -120,15 +122,21 @@ def lever_arm_compensation(phase_center, radar_dat):
 
 
 def get_phase_center(season):
+    '''
+    Get the phase center values for the snow radar. Used for lever arm compensation.
+    Lever arm information are located at:
+    https://gitlab.com/openpolarradar/opr/-/blob/main/matlab/processing/lever_arm.m#L2914:
+    
+    '''
+    
     if season == '2016_Greenland_P3':
-    #Lever arms for 2016 Greenland P3, adapted from: https://gitlab.com/openpolarradar/opr/-/blob/main/matlab/processing/lever_arm.m#L2914:
     # Snow Tx: X = 297.75",Y = 0;Z = -26.81"; RX: X = 168.5",Y = 0;Z = -38.75" 
     # X,Y,Z are in aircraft coordinates relatively to GPS antenna
 
         LArx = np.zeros(3)
         LAtx = np.zeros(3)
 
-        LArx[0] = -168.5*2.54/100  #- 1.355 what are the additional numbers 
+        LArx[0] = -168.5*2.54/100  #- 1.355 what are the additional numbers ??
         LArx[1] =  0.045
         LArx[2] = -38.75*2.54/100 #+ 3.425
 
@@ -156,6 +164,10 @@ def get_phase_center(season):
 
 
 def construct_elevation_axis(params, elevation_axis, airsnow):
+    '''
+    Construct vertical (elevation) axis for each waveform. This includes compensation for reduced speed of light in snow.
+    '''
+    
     elev_snow_compensation = params['delta_fast_time_range'] / params['n_snow'] #- params['delta_fast_time_range'] #
     eaxis_arr = []
     
@@ -173,6 +185,12 @@ def construct_elevation_axis(params, elevation_axis, airsnow):
 
 
 def find_level_surface(air_snow_elevation, snow_ice_elevation, elevations_axii):
+    
+    '''
+    Find the level-surface elevation from air--snow interface picks. Method is adopted from Petty et al 2016. 
+    Only air_snow_elevation argument is used for calculation. snow_ice_elevation and elevations_axii are adjusted accordingly.
+    '''
+    
     df_tmp = pd.DataFrame({'air_snow_elevation':air_snow_elevation})
     df_tmp['elev_quantile'] = pd.qcut(df_tmp['air_snow_elevation'], q=100, labels=False, duplicates='drop')
     min_ind = (df_tmp.groupby('elev_quantile')['air_snow_elevation'].mean().diff().argmin() - 10 , df_tmp.groupby('elev_quantile')['air_snow_elevation'].mean().diff().argmin() + 10)
@@ -185,7 +203,7 @@ def find_level_surface(air_snow_elevation, snow_ice_elevation, elevations_axii):
     return air_snow_elevation, snow_ice_elevation, elevations_axii, level_ice_elevation
 
 
-def get_footprintsize(H, c=speed_of_light, center_frequency=5e9, B=6e9, kt=1.5 ,T=0, v=140, n=16, PRF=1953.125):
+def get_footprintsize(H, c=speed_of_light, center_frequency=3.5e9, B=6e9, kt=1.5 ,T=0, v=140, n=16, PRF=1953.125):
     '''
     Equation 4, 5 and 7 from IRSNO1B documentation
     
@@ -202,9 +220,11 @@ def get_footprintsize(H, c=speed_of_light, center_frequency=5e9, B=6e9, kt=1.5 ,
     L = (n * v) / (PRF) # from Arttu thesis equation 4.6
     
     along_track_resolution = H * np.tan(np.arcsin(lambdac/ (2 * L)))
+    along_track_resolution = along_track_resolution / 5 # according to Appendix A2 of Fredensborg-Hansen (2024)
     
     across_track_resolution = 2 * np.sqrt((c * kt)/B * (H + (T)/(np.sqrt(3.15))))
     # across_track_resolution = np.array([200] * len(across_track_resolution))
+    
     
     # FRESNEL ZONE, IF SMOOTH (QUASI SPECULAR TARGET) AS E.G. INTERNAL LAYERS (?)
     # across_track_resolution = np.sqrt(2 * lambdac * (H + (T)/(np.sqrt(3.15))))
@@ -301,8 +321,27 @@ def construct_footprints_theoretical(radar_dat, x, y, level_ice_elevation, veloc
         
     return footprints, across_track_radius, along_track_radius
  
+ 
+def get_SR_precision(radar_dat, params, P_as, P_si, P_noise, P_noise_clutter, k=1.5): 
+    
+    '''
+    Calculate the precision of the picked layers based on the SNR of the picked layers.
+    Equations based on Newman et al 2014.
+    '''
+    
+    range_resolution = (k * speed_of_light) / (2 * radar_dat.bandwidth)
+    
+    eps_samp = radar_dat.dft * speed_of_light / 2
+    eps_SNR_as = range_resolution / (2 * P_as / P_noise)
+    eps_SNR_si = range_resolution / (2 * P_si / P_noise_clutter)
+    
+    eps_SR = np.sqrt(eps_samp**2 + eps_SNR_as**2 + eps_SNR_si**2)
+    
+    return eps_SR
+
 
 def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_results=False, overwrite=True, path='./dump', atm_folder='./'):
+    # print(data_path)
     '''
     For a given SnowRadar datafile, estimate the air-snow and snow-ice interfaces
     using the supplied picker and snow density
@@ -358,7 +397,10 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
         
         outfile = outpath / outname
         if outfile.exists() and overwrite == False:
+        
             LOGGER.warning('File exists for %s. Skipping processing....', Path(data_path).name)
+            
+            ## this needs to be adjusted for the new xarray format
             result = pd.read_csv(str(outfile), index_col=0)
             return result
         
@@ -413,6 +455,8 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
         lin_coefs = np.array(lin_coefs).T
     
         max_elevation_ind = np.array(max_elevation_ind)
+    
+    
     
     elif picker.__name__ == 'Peakiness':
         write_type = 'Peakiness'
@@ -501,18 +545,25 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
         air_snow_elevation, snow_ice_elevation, elevations_axii, level_ice_elevation = find_level_surface(air_snow_elevation, snow_ice_elevation, elevations_axii)
         max_elevation -= level_ice_elevation
     
-    footprints, across_track_radius, along_track_radius = construct_footprints_theoretical(radar_dat, radar_dat.x, radar_dat.y, level_ice_elevation, velocity)
-    # print(f'Footprints constructed: {len(footprints)}')
-    # print('ATM folder:', atm_folder)
-    if atm_folder != None:
-        ATM_data = fetch_atm_data_levelled(radar_dat, atm_folder)
-        ATM_classes, ATM_as_interfaces_mean, ATM_as_interfaces_90 = match_atm_data2(ATM_data, footprints)
+    
+    if atm_folder is not None and (not isinstance(atm_folder, list) or any(atm_folder)):
+        footprints, across_track_radius, along_track_radius = construct_footprints_theoretical(radar_dat, radar_dat.x, radar_dat.y, level_ice_elevation, velocity)
+        ATM_data, ATM_data_names = fetch_atm_data_levelled(radar_dat, atm_folder)
+        ATM_classes, ATM_as_interfaces_mean, ATM_as_interfaces_90, ATM_htopo = match_atm_data2(ATM_data, footprints)
 
     
     noise =  radar_dat.data_radar[:100, :].mean(axis=0)
     SNR = 10 * np.log10(radar_dat.data_radar / noise)
+ 
     
     if write_type == 'Wavelet':
+        precision = get_SR_precision(radar_dat,
+                                params,
+                                P_as=radar_dat.data_radar[airsnow, range(len(airsnow))],
+                                P_si=radar_dat.data_radar[snowice, range(len(airsnow))],
+                                P_noise=noise,
+                                P_noise_clutter=[np.median(radar_dat.data_radar[i+1:j-1, range(len(airsnow))]) for i,j in zip(airsnow, snowice)]
+                                )
         
         ds = xr.Dataset(
             data_vars=dict(
@@ -520,6 +571,9 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
                 
                 noise = (['time'], noise),
                 SNR = (['range_bin','time'], SNR),
+                
+                precision = (['time'], precision),
+            
                 
                 altitude=(["time"], radar_dat.elevation),
                 roll=(["time"], radar_dat.roll),
@@ -553,7 +607,8 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
                 # htopo=(["time"], htopo)
                 ATM_classes=(["time"], ATM_classes) if atm_folder != None else None,
                 ATM_as_interfaces_mean=(["time"], ATM_as_interfaces_mean) if atm_folder != None else None,
-                ATM_as_interfaces_90=(["time"], ATM_as_interfaces_90) if atm_folder != None else None  
+                ATM_as_interfaces_90=(["time"], ATM_as_interfaces_90) if atm_folder != None else None,
+                ATM_htopo=(["time"], ATM_htopo) if atm_folder != None else None  
                 
 
             ),
@@ -582,11 +637,46 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
                 level_ice_elevation=level_ice_elevation,
                 number_averages=radar_dat.number_averages,
                 PRF=radar_dat.prf,
-                velocity=velocity #just a rough estimate of the velocity of the aircraft
+                velocity=velocity, #just a rough estimate of the velocity of the aircraft
+                # ATM_data= ATM_data_names if atm_folder != None else str(None)  
                 
             )
         )
     elif write_type == 'Peakiness':
+        
+        P_as = []
+        P_si = []
+        P_noise_clutter = []
+                
+        for i, asnow in enumerate(airsnow):
+            if np.isnan(asnow):
+                P_as.append(np.nan)
+            else:
+                P_as.append(radar_dat.data_radar[int(asnow),i])
+                
+        for i, sice in enumerate(snowice):
+            if np.isnan(sice):
+                P_si.append(np.nan)
+            else:
+                P_si.append(radar_dat.data_radar[int(sice),i])
+        
+        for k, i, j in zip(range(len(airsnow)), airsnow, snowice):
+            if np.isnan(i) or np.isnan(j):
+                P_noise_clutter.append(np.nan)
+            else:
+                P_noise_clutter.append(np.median(radar_dat.data_radar[int(i)+1:int(j)-1, k]))
+                
+        P_as = np.array(P_as)
+        P_si = np.array(P_si)
+        P_noise_clutter = np.array(P_noise_clutter)
+
+        precision = get_SR_precision(radar_dat,
+                                params,
+                                P_as=P_as,
+                                P_si=P_si,
+                                P_noise=noise,
+                                P_noise_clutter=P_noise_clutter
+                                )
         ds = xr.Dataset(
             data_vars=dict(
                 # radar_data = (['range_bin','time'], radar_dat.data_radar),
@@ -594,6 +684,8 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
                 altitude=(["time"], radar_dat.elevation),
                 roll=(["time"], radar_dat.roll),
                 pitch=(["time"], radar_dat.pitch),
+                
+                precision = (['time'], precision),
                 
                 air_snow_index=(["time"], airsnow),
                 snow_ice_index=(["time"], snowice),
@@ -605,7 +697,8 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
                 max_elevation=(["time"], max_elevation),
                 ATM_classes=(["time"], ATM_classes) if atm_folder != None else None,
                 ATM_as_interfaces_mean=(["time"], ATM_as_interfaces_mean) if atm_folder != None else None,
-                ATM_as_interfaces_90=(["time"], ATM_as_interfaces_90) if atm_folder != None else None  
+                ATM_as_interfaces_90=(["time"], ATM_as_interfaces_90) if atm_folder != None else None,  
+                ATM_htopo=(["time"], ATM_htopo) if atm_folder != None else None  
                 
                 
             ),
@@ -639,29 +732,12 @@ def extract_layers(data_path, picker=algorithms.Wavelet_TN, params=None, dump_re
             )
         )
 
-    # result = pd.DataFrame({
-    #     'src': data_src,
-    #     'picker': picker.__name__,
-    #     'time': radar_dat.time_utc,
-    #     'lat': radar_dat.lat,
-    #     'lon': radar_dat.lon,
-    #     'altitude':radar_dat.elevation,
-    #     ''
-    #     'n_snow': params['n_snow'],
-    #     'b_as': upper + airsnow,
-    #     'b_si': upper + snowice,
-    #     'snow_depth': snow_depth,
-    # })
     
     if dump_results:
         outpath.mkdir(parents=True, exist_ok=True)
         ds.to_netcdf(str(outfile))
-        
-        # result.to_csv(str(outfile), na_rep='nan')
-        
-        # result.to_csv(str(outfile), na_rep='nan')
-    
-    return ds
+
+    return ds#, ATM_data
 
 
 def batch_process(input_sr_data, picker, params, workers=4, dump_results=False, overwrite=True, path='./', atm_folder='./'):
@@ -701,6 +777,7 @@ def batch_process(input_sr_data, picker, params, workers=4, dump_results=False, 
     overwrite_triggers = [overwrite] * length  
     path_triggers = [path] * length  
     picker_args = [picker] * length                     
+    atm_args = [atm_folder] * length
     
     if isinstance(params, dict):
     # If the input parameters the same for every file
@@ -711,7 +788,7 @@ def batch_process(input_sr_data, picker, params, workers=4, dump_results=False, 
             dump_triggers,
             overwrite_triggers,
             path_triggers,
-            [atm_folder] * length
+            atm_args
 
         )
     # If the input parameters vary
@@ -723,10 +800,9 @@ def batch_process(input_sr_data, picker, params, workers=4, dump_results=False, 
             dump_triggers,
             overwrite_triggers,
             path_triggers,
-            [atm_folder] * length
-            
+            atm_args
         )
-    
+        
     with ProcessPoolExecutor(workers) as pool:
         futures = [pool.submit(extract_layers, *foo) for foo in process_args]
         results = [f.result() for f in futures]
@@ -734,6 +810,10 @@ def batch_process(input_sr_data, picker, params, workers=4, dump_results=False, 
     # return a concatenated dataframe containing results for all input datasets
     return results
 
+
+
+## THE FOLLOWING FUNCTIONS ARE USED TO FIND CO-LOCATED ATM DATA 
+## THEY SHOULD PROBABLY BE MOVED TO A SEPERATE FILE
 
 def get_atm_filename(row):
     date = row[1]['date']
@@ -777,7 +857,8 @@ def fetch_atm_data_levelled(sr, atm_folder):
             
     df.reset_index(drop=True, inplace=True)
     
-    return df
+    return df, relevant_atm_data_files
+
 
 def get_atm_bbox(row):
     try:
@@ -785,98 +866,6 @@ def get_atm_bbox(row):
     except:
         return box(0,0,0,0)
 
-# def fetch_atm_data_grid(sr, atm_folder):
-
-#     d = sr.day.strftime('%Y%m%d')
-    
-#     relevant_atm_data = [
-#         xr.open_dataset(os.path.join(r, f)) 
-#         for r, ds, fs in os.walk(atm_folder) 
-#         for f in fs if 
-#         'ATM' in f and 
-#         f.endswith('.nc') and 
-#         f.split('_')[0] == d
-#     ]
-    
-#     if len(relevant_atm_data) == 0:
-#         LOGGER.warning('No ATM data found for %s' % str(sr))
-#         return
-    
-#     relevant_atm_data = [
-#         atm for atm in relevant_atm_data
-#         if box(*atm.attrs.bbox_xy).intersects(sr.line_xy)
-#     ]
-    
-#     if len(relevant_atm_data) == 0:
-#         LOGGER.warning('No ATM data found for %s' % str(sr))
-#         return
-    
-#     relevant_atm_data.sort(key=lambda x: x.file_name)
-    
-#     for data in relevant_atm_data:
-#         if data  == relevant_atm_data[0]:
-#             df = data.to_dataframe().reset_index()
-#         else:    
-#             df = pd.concat([df, data.to_dataframe().reset_index()])
-            
-#     return df
-
-
-# def fetch_atm_data(sr, atm_folder):
-#     '''
-#     Attempt to find and load any locally-available NASA ATM data granules 
-#     that share the same day as the passed SnowRadar object
-
-#     Inputs:
-#         atm_folder: the local directory where ATM granules should be found
-    
-#     Outputs:
-#         A dataframe containing concatenated ATM data (if multiple local ATM files exist)
-#     '''
-#     if not os.path.isdir(atm_folder):
-#         raise FileNotFoundError('Cannot locate ATM folder: %s' % os.path.abspath(atm_folder))
-
-#     # check for temporal match (same day as current SnowRadar data)
-#     d = sr.day.strftime('%Y%m%d')
-#     relevant_atm_data = [
-#         ATM(os.path.join(r, f)) 
-#         for r, ds, fs in os.walk(atm_folder) 
-#         for f in fs if 
-#         'ATM' in f and 
-#         f.endswith('.h5') and 
-#         f.split('_')[1] == d
-#     ]
-#     if len(relevant_atm_data) == 0:
-#         LOGGER.warning('No ATM data found for %s' % str(sr))
-#         return
-
-#     # check for spatial match (very rough due to simplicity of atm.bbox)
-#     relevant_atm_data = [
-#         atm for atm in relevant_atm_data
-#         if atm.bbox_xy.intersects(sr.line_xy)
-#     ]
-#     if len(relevant_atm_data) == 0:
-#         LOGGER.warning('No ATM data found for %s' % str(sr))
-#         return
-
-#     # assuming we still have some ATM data after spatiotemporal filtering, 
-#     # we sort by filename and concatenate into one big dataframe
-#     relevant_atm_data.sort(key=lambda x: x.file_name)
-#     df = pd.concat([
-#         pd.DataFrame({
-#             'atm_src': [atm.file_name]*len(atm.pitch),
-#             'atm_lat': atm.latitude,
-#             'atm_lon': atm.longitude,
-#             'atm_x': transformer.transform(atm.longitude, atm.latitude)[0],
-#             'atm_y': transformer.transform(atm.longitude, atm.latitude)[1],
-#             'atm_elev': atm.elevation,
-#             'atm_pitch': atm.pitch,
-#             'atm_roll': atm.roll,
-#             'atm_time_gps': atm.time_gps
-#         })
-#         for atm in relevant_atm_data
-#     ]).reset_index(drop=True)
-#     return df
 
 
 def points_in_poly_list(polygons, points, min_points=1):
@@ -916,19 +905,6 @@ def points_in_poly_list(polygons, points, min_points=1):
             poly_points_indices[idx] = pts
     return poly_points_indices
 
-
-
-# def match_atm_data(ATM_data, footprints):
-    
-#     points = [Point(x,y) for x,y in zip(ATM_data['x'], ATM_data['y'])]
-#     poly_points_indices = points_in_poly_list(footprints, points)
-    
-#     elevations = []
-#     for key in poly_points_indices.keys():
-        
-#         elevations.append(ATM_data.loc[poly_points_indices[key],'elev_levelled'])
-        
-#     return pd.DataFrame({'elevations': elevations})
     
    
 def match_atm_data2(ATM_data, footprints, deformation_threshold=20):
@@ -939,7 +915,7 @@ def match_atm_data2(ATM_data, footprints, deformation_threshold=20):
     classes = []
     ATM_as_interfaces_mean = []
     ATM_as_interfaces_90 = []
-    
+    ATM_htopo = []
     for key in poly_points_indices.keys():
         
         if len(poly_points_indices[key]) > 0:
@@ -948,22 +924,15 @@ def match_atm_data2(ATM_data, footprints, deformation_threshold=20):
             
             ATM_as_interfaces_mean.append(ATM_data.loc[poly_points_indices[key],'elev_levelled'].mean())
             ATM_as_interfaces_90.append(np.nanquantile(ATM_data.loc[poly_points_indices[key],'elev_levelled'], .9))
+            ATM_htopo.append(np.nanquantile(ATM_data.loc[poly_points_indices[key],'elev_levelled'], .95) - np.nanquantile(ATM_data.loc[poly_points_indices[key],'elev_levelled'], .05))
             
         else:
             classes.append(np.nan)
             ATM_as_interfaces_mean.append(np.nan)
             ATM_as_interfaces_90.append(np.nan)
+            ATM_htopo.append(np.nan)
 
-    return classes, ATM_as_interfaces_mean, ATM_as_interfaces_90
+    return classes, ATM_as_interfaces_mean, ATM_as_interfaces_90, ATM_htopo
      
-# def calculate_htopo(ATM_elevations,length):
-    
-#     if ATM_elevations is None:
-#         return [np.nan] * length
-    
-#     htopo = []
-#     for i, elevs in enumerate(ATM_elevations):
-#         htopo.append(np.nanquantile(elevs, .95) - np.nanquantile(elevs, .05))   
-#     return htopo
 
 

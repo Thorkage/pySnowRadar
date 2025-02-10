@@ -45,7 +45,11 @@ def Peakiness(data,
         logpeaks,_ = signal.find_peaks(data_norm_dB, height = noise_mean + log_peak_threshold * (np.nanmax(data_norm_dB) - noise_mean))
     
         #Calculate left-hand peakiness value for the logarithmic data peaks from the linear normalized data
+        
+        # BELOW VALUE IS CHANGED FROM 10 TO 5 FOR EXPERIMENTAL PURPOSES with the 2-8 GHz radar
         range_bins = 10 #equals to approximately 2 x 3-dB range resolution (~8 cm)
+        
+        
         PP_L_log = []
         for peak in logpeaks:
             PP_L_log.append(data_norm[peak] / np.mean(data_norm[peak - range_bins:peak]) * range_bins)
